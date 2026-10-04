@@ -57,6 +57,8 @@ jobs:
   windows-build:
     name: Windows
     runs-on: windows-latest
+    env:
+      CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
     steps:
       - uses: actions/checkout@v4
 
