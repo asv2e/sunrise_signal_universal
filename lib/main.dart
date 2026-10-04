@@ -15,7 +15,7 @@ void main() async {
   await themeService.loadTheme();
 
   // Init Notifications
-  ReminderService().initNotifications();
+  await ReminderService().initNotifications();
 
   runApp(
     MultiProvider(

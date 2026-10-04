@@ -7,6 +7,7 @@
 -   **Lifestyle Insights:** Record data on sleep, stress, exercise, alcohol, and caffeine to identify patterns.
 -   **Secure Local Storage:** All user data stays private, stored securely on the device.
 -   **App Lock:** The app can be locked using passcode and/or biometrics.
+-   **Daily Reminders:** Schedule local reminders on Android, iOS, macOS, Linux, and Windows. Linux delivers reminders while the app is running; Windows queues them up to one year ahead and renews the queue when the app is reopened.
 -   **Material UI:** A sleek and user-friendly design for a seamless experience.
 -   **Open Source:** A fully open-source project to foster collaboration and community improvement.
 

@@ -1,9 +1,7 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart'
-  show defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
@@ -49,8 +47,10 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() {
       _isPasscodeSet = passcodeSet;
       _isBiometricEnabled = biometricEnabled;
-      _isReminderEnabled = reminderEnabled;
-      _reminderTime = reminderTime;
+      _isReminderEnabled =
+          ReminderService.supportsDailyReminders && reminderEnabled;
+      _reminderTime =
+          ReminderService.supportsDailyReminders ? reminderTime : null;
     });
   }
 
@@ -144,15 +144,9 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<bool> _requestNotificationPermission() async {
-    FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-        FlutterLocalNotificationsPlugin();
-
-    bool? notificationPermission = await flutterLocalNotificationsPlugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
-
-    if (notificationPermission == null || !notificationPermission) {
+    final notificationPermission =
+        await ReminderService().requestNotificationPermission();
+    if (!notificationPermission) {
       if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -187,6 +181,15 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _pickTimeAndSetReminder() async {
     final currentContext = context;
     final messenger = ScaffoldMessenger.maybeOf(currentContext);
+    if (!ReminderService.supportsDailyReminders) {
+      messenger?.showSnackBar(
+        const SnackBar(
+          content: Text('Daily reminders are not supported on this platform.'),
+        ),
+      );
+      return;
+    }
+
     bool permissionGranted = await _requestNotificationPermission();
     if (!permissionGranted) return; // Stop if no permission
 
@@ -430,26 +433,26 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           ListTile(
             title: const Text('Daily Reminder'),
-            subtitle: Text(
-              _isReminderEnabled && _reminderTime != null
-                  ? _reminderTime!.format(context)
-                  : 'Off',
-            ),
+            subtitle: Text(_reminderSubtitle(context)),
             trailing: Switch(
               value: _isReminderEnabled,
-              onChanged: (value) async {
-                if (value) {
-                  await _pickTimeAndSetReminder();
-                } else {
-                  await _toggleReminder(false);
-                }
-              },
+              onChanged: ReminderService.supportsDailyReminders
+                  ? (value) async {
+                      if (value) {
+                        await _pickTimeAndSetReminder();
+                      } else {
+                        await _toggleReminder(false);
+                      }
+                    }
+                  : null,
             ),
-            onTap: () async {
-              if (!_isReminderEnabled) {
-                await _pickTimeAndSetReminder();
-              }
-            },
+            onTap: ReminderService.supportsDailyReminders
+                ? () async {
+                    if (!_isReminderEnabled) {
+                      await _pickTimeAndSetReminder();
+                    }
+                  }
+                : null,
           ),
           const Divider(),
           ListTile(
@@ -549,5 +552,31 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+  }
+
+  String _reminderSubtitle(BuildContext context) {
+    if (!ReminderService.supportsDailyReminders) {
+      return 'Not available on this platform';
+    }
+
+    final time = _isReminderEnabled && _reminderTime != null
+        ? _reminderTime!.format(context)
+        : null;
+
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.linux:
+        return time == null
+            ? 'Only while the app is open'
+            : '$time · App must stay open';
+      case TargetPlatform.windows:
+        return time == null
+            ? 'Windows queues one year; reopen the app to renew'
+            : '$time · Queued for one year';
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+      case TargetPlatform.macOS:
+      case TargetPlatform.fuchsia:
+        return time ?? 'Off';
+    }
   }
 }
