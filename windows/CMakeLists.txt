@@ -58,6 +58,7 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+target_link_libraries(flutter_local_notifications_windows PRIVATE runtimeobject)
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can
