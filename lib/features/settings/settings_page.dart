@@ -166,9 +166,10 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _toggleReminder(bool value) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+
     if (value) {
       await _pickTimeAndSetReminder();
-      if (!mounted) return;
       return;
     }
 
@@ -178,17 +179,20 @@ class _SettingsPageState extends State<SettingsPage> {
       _isReminderEnabled = false;
       _reminderTime = null;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
+    messenger?.showSnackBar(
       const SnackBar(content: Text('Daily reminder disabled.')),
     );
   }
 
   Future<void> _pickTimeAndSetReminder() async {
+    final currentContext = context;
+    final messenger = ScaffoldMessenger.maybeOf(currentContext);
     bool permissionGranted = await _requestNotificationPermission();
     if (!permissionGranted) return; // Stop if no permission
 
     final TimeOfDay? pickedTime = await showTimePicker(
-      context: context,
+      // ignore: use_build_context_synchronously
+      context: currentContext,
       initialTime: _reminderTime ?? TimeOfDay.now(),
     );
 
@@ -205,7 +209,7 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() {
         _isReminderEnabled = true;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger?.showSnackBar(
         const SnackBar(content: Text('Daily reminder set!')),
       );
     }
@@ -255,27 +259,28 @@ class _SettingsPageState extends State<SettingsPage> {
                 final String passcode = passcodeController.text.trim();
                 final String confirmPasscode =
                     confirmPasscodeController.text.trim();
+                final dialogContext = context;
+                final navigator = Navigator.of(dialogContext);
+                final messenger = ScaffoldMessenger.maybeOf(dialogContext);
 
                 if (passcode.isEmpty || confirmPasscode.isEmpty) {
-                  _showErrorDialog(context, 'Passcode cannot be blank.');
+                  _showErrorDialog(dialogContext, 'Passcode cannot be blank.');
                   return;
                 }
 
                 if (passcode != confirmPasscode) {
-                  _showErrorDialog(context, 'Passcodes do not match.');
+                  _showErrorDialog(dialogContext, 'Passcodes do not match.');
                   return;
                 }
 
-                final dialogContext = context;
-                final messenger = ScaffoldMessenger.maybeOf(dialogContext);
                 await _authService.setPasscode(passcode);
                 if (!mounted) return;
                 setState(() {
                   _isPasscodeSet = true;
                 });
 
-                if (Navigator.of(dialogContext).canPop()) {
-                  Navigator.pop(dialogContext);
+                if (navigator.canPop()) {
+                  navigator.pop();
                 }
 
                 messenger?.showSnackBar(

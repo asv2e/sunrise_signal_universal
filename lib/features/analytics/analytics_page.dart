@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../services/secure_storage_service.dart';
-import '../../models/log_model.dart';
 
 class AnalyticsPage extends StatefulWidget {
   const AnalyticsPage({super.key});
@@ -243,7 +242,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   Widget _buildSummaryCard(String title, String value, Color color) {
     return Expanded(
       child: Card(
-        color: color.withValues(alpha: 0.5),
+        color: color.withAlpha((255 * 0.5).round()),
         margin: const EdgeInsets.all(2),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(0, 15, 0, 15),

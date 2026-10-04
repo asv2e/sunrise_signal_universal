@@ -160,7 +160,7 @@ class _CalendarPageState extends State<CalendarPage> {
                       ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
-                        initialValue: stressLevel,
+                        value: stressLevel,
                         decoration:
                             const InputDecoration(labelText: 'Stress Level'),
                         items: ['Low', 'Medium', 'High']
