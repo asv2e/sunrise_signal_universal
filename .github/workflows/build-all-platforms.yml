@@ -39,6 +39,27 @@ jobs:
       - run: flutter build linux --release
       - run: flutter build web --release
 
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk
+          path: build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+
+      - name: Upload Linux release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: build/linux/x64/release/bundle/
+          if-no-files-found: error
+
+      - name: Upload Web release
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-release
+          path: build/web/
+          if-no-files-found: error
+
   apple-builds:
     name: iOS and macOS
     runs-on: macos-latest
@@ -51,8 +72,49 @@ jobs:
           cache: true
 
       - run: flutter pub get
-      - run: flutter build ios --release --no-codesign
+      - run: flutter build ipa --release --no-codesign
       - run: flutter build macos --release
+
+      - name: Package unsigned iOS IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archive="$(find build/ios/archive -maxdepth 1 -type d -name '*.xcarchive' -print -quit)"
+          if [[ -z "$archive" ]]; then
+            echo "No iOS .xcarchive was created." >&2
+            exit 1
+          fi
+
+          app="$(find "$archive/Products/Applications" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          if [[ -z "$app" ]]; then
+            echo "No .app was found inside $archive." >&2
+            exit 1
+          fi
+
+          ipa_dir="$GITHUB_WORKSPACE/build/ios/ipa"
+          mkdir -p "$ipa_dir/Payload"
+          cp -R "$app" "$ipa_dir/Payload/"
+          (
+            cd "$ipa_dir"
+            /usr/bin/zip -qry sunrise_signal.ipa Payload
+          )
+
+          test -s "$ipa_dir/sunrise_signal.ipa"
+
+      - name: Upload iOS IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-release-ipa
+          path: build/ios/ipa/sunrise_signal.ipa
+          if-no-files-found: error
+
+      - name: Upload macOS release app
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release-app
+          path: build/macos/Build/Products/Release/*.app
+          if-no-files-found: error
 
   windows-build:
     name: Windows
@@ -69,3 +131,10 @@ jobs:
 
       - run: flutter pub get
       - run: flutter build windows --release
+
+      - name: Upload Windows release
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: build/windows/x64/runner/Release/
+          if-no-files-found: error
