@@ -12,7 +12,6 @@ class AnalyticsPage extends StatefulWidget {
 
 class _AnalyticsPageState extends State<AnalyticsPage> {
   final SecureStorageService _storageService = SecureStorageService();
-  Map<DateTime, LogModel> _logs = {};
   int _yesCount = 0;
   int _noCount = 0;
   double _averageSleep = 0;
@@ -38,8 +37,6 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   Future<void> _loadData() async {
     final logs = await _storageService.loadLogs();
     setState(() {
-      _logs = logs;
-
       // Count morning wood days based on emoji
       _yesCount = logs.values.where((log) => log.emoji == '🍆').length;
       _noCount = logs.values.where((log) => log.emoji == '😔').length;
@@ -246,7 +243,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   Widget _buildSummaryCard(String title, String value, Color color) {
     return Expanded(
       child: Card(
-        color: color.withOpacity(0.5),
+        color: color.withValues(alpha: 0.5),
         margin: const EdgeInsets.all(2),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(0, 15, 0, 15),

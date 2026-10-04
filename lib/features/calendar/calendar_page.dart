@@ -85,13 +85,11 @@ class _CalendarPageState extends State<CalendarPage> {
     bool exercise = false;
     bool alcoholIntake = false;
     bool caffeineIntake = false;
-    String? emoji = '😔';
 
     // Check if there is already an entry for the selected date
     final existingLog = _logs[date];
     if (existingLog != null) {
       stressLevel = existingLog.stressLevel;
-      emoji = existingLog.emoji;
       exercise = existingLog.exercise == 'Yes';
       alcoholIntake = existingLog.alcoholIntake == 'Yes';
       caffeineIntake = existingLog.caffeineIntake == 'Yes';
@@ -162,7 +160,7 @@ class _CalendarPageState extends State<CalendarPage> {
                       ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
-                        value: stressLevel,
+                        initialValue: stressLevel,
                         decoration:
                             const InputDecoration(labelText: 'Stress Level'),
                         items: ['Low', 'Medium', 'High']

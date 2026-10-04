@@ -10,10 +10,10 @@ class LockScreenPage extends StatefulWidget {
   const LockScreenPage({super.key});
 
   @override
-  _LockScreenPageState createState() => _LockScreenPageState();
+  LockScreenPageState createState() => LockScreenPageState();
 }
 
-class _LockScreenPageState extends State<LockScreenPage> {
+class LockScreenPageState extends State<LockScreenPage> {
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final LocalAuthentication _localAuth = LocalAuthentication();
 
@@ -105,6 +105,8 @@ class _LockScreenPageState extends State<LockScreenPage> {
         options: const AuthenticationOptions(stickyAuth: true),
       );
 
+      if (!mounted) return;
+
       if (isAuthenticated) {
         Navigator.pushAndRemoveUntil<void>(
           context,
@@ -118,6 +120,7 @@ class _LockScreenPageState extends State<LockScreenPage> {
             const SnackBar(content: Text('Biometric authentication failed')));
       }
     } on PlatformException catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Error: $e')));
     }

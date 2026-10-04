@@ -81,8 +81,10 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _togglePasscode(bool value) async {
     if (value) {
       await showSetPasscodeDialog(context);
+      if (!mounted) return;
     } else {
       await _authService.removePasscode();
+      if (!mounted) return;
       setState(() {
         _isPasscodeSet = false;
       });
@@ -113,11 +115,13 @@ class _SettingsPageState extends State<SettingsPage> {
     if (authenticated) {
       if (value) {
         await _enableBiometricLock();
+        if (!mounted) return;
         setState(() {
           _isAuthenticating = false;
         });
       } else {
         await _authService.disableBiometricLock();
+        if (!mounted) return;
         setState(() {
           _isBiometricEnabled = false;
         });
@@ -129,6 +133,7 @@ class _SettingsPageState extends State<SettingsPage> {
         });
       }
     } else {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Authentication failed')),
       );
@@ -148,6 +153,7 @@ class _SettingsPageState extends State<SettingsPage> {
         ?.requestNotificationsPermission();
 
     if (notificationPermission == null || !notificationPermission) {
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content:
@@ -162,16 +168,19 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _toggleReminder(bool value) async {
     if (value) {
       await _pickTimeAndSetReminder();
-    } else {
-      await ReminderService.cancelReminders();
-      setState(() {
-        _isReminderEnabled = false;
-        _reminderTime = null;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Daily reminder disabled.')),
-      );
+      if (!mounted) return;
+      return;
     }
+
+    await ReminderService.cancelReminders();
+    if (!mounted) return;
+    setState(() {
+      _isReminderEnabled = false;
+      _reminderTime = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Daily reminder disabled.')),
+    );
   }
 
   Future<void> _pickTimeAndSetReminder() async {
@@ -184,6 +193,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
 
     if (pickedTime != null) {
+      if (!mounted) return;
       setState(() {
         _reminderTime = pickedTime;
       });
@@ -191,6 +201,7 @@ class _SettingsPageState extends State<SettingsPage> {
         hour: pickedTime.hour,
         minute: pickedTime.minute,
       );
+      if (!mounted) return;
       setState(() {
         _isReminderEnabled = true;
       });
@@ -255,14 +266,19 @@ class _SettingsPageState extends State<SettingsPage> {
                   return;
                 }
 
+                final dialogContext = context;
+                final messenger = ScaffoldMessenger.maybeOf(dialogContext);
                 await _authService.setPasscode(passcode);
+                if (!mounted) return;
                 setState(() {
                   _isPasscodeSet = true;
                 });
 
-                Navigator.pop(context);
+                if (Navigator.of(dialogContext).canPop()) {
+                  Navigator.pop(dialogContext);
+                }
 
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger?.showSnackBar(
                   const SnackBar(content: Text('Passcode set successfully!')),
                 );
               },
@@ -294,6 +310,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _enableBiometricLock() async {
     await _authService.enableBiometricLock();
+    if (!mounted) return;
     setState(() {
       _isBiometricEnabled = true;
     });
