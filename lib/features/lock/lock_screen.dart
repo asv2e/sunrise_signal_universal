@@ -32,6 +32,7 @@ class _LockScreenPageState extends State<LockScreenPage> {
   // Load the passcode from secure storage
   Future<void> _loadPasscode() async {
     String? passcode = await _secureStorage.read(key: 'passcode');
+    if (!mounted) return;
     setState(() {
       _isPasscodeSet = passcode != null && passcode.isNotEmpty;
       _storedPasscode = passcode ?? "";
@@ -41,9 +42,21 @@ class _LockScreenPageState extends State<LockScreenPage> {
   // Check if biometric authentication is activated
   Future<void> _checkBiometricAvailability() async {
     final AuthService authService = AuthService();
-    setState(() async {
-      _isBiometricEnabled = await authService.isBiometricEnabled();
-    });
+    try {
+      final isBiometricEnabled = await authService.isBiometricEnabled();
+      final isDeviceSupported = await _localAuth.isDeviceSupported();
+      if (!mounted) return;
+      setState(() {
+        _isBiometricEnabled = isBiometricEnabled && isDeviceSupported;
+      });
+    } catch (error) {
+      debugPrint('Device authentication check failed: $error');
+      if (mounted) {
+        setState(() {
+          _isBiometricEnabled = false;
+        });
+      }
+    }
   }
 
   // Function to authenticate using passcode
@@ -88,7 +101,7 @@ class _LockScreenPageState extends State<LockScreenPage> {
   Future<void> _authenticateWithBiometrics() async {
     try {
       bool isAuthenticated = await _localAuth.authenticate(
-        localizedReason: "Please authenticate to unlock",
+        localizedReason: "Authenticate with your device to unlock",
         options: const AuthenticationOptions(stickyAuth: true),
       );
 
@@ -128,7 +141,7 @@ class _LockScreenPageState extends State<LockScreenPage> {
             if (_isBiometricEnabled)
               ElevatedButton(
                 onPressed: _authenticateWithBiometrics,
-                child: const Text("Unlock with Biometrics"),
+                child: const Text("Unlock with Device"),
               ),
           ],
         ),

@@ -1,5 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
+import 'package:flutter/foundation.dart'
+  show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -21,7 +22,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _isPasscodeSet = false;
-  bool _hasBiometrics = false;
+  bool _hasDeviceAuthentication = false;
   bool _isBiometricEnabled = false;
   bool _isReminderEnabled = false;
   TimeOfDay? _reminderTime;
@@ -36,7 +37,7 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _loadSettings();
-    _checkBiometrics();
+    _checkDeviceAuthentication();
     _loadLogs();
   }
 
@@ -53,13 +54,20 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
-  Future<void> _checkBiometrics() async {
-    bool canCheckBiometrics = await _localAuth.canCheckBiometrics;
-    bool isDeviceSupported = await _localAuth.isDeviceSupported();
-    if (mounted) {
+  Future<void> _checkDeviceAuthentication() async {
+    try {
+      final isDeviceSupported = await _localAuth.isDeviceSupported();
+      if (!mounted) return;
       setState(() {
-        _hasBiometrics = canCheckBiometrics && isDeviceSupported;
+        _hasDeviceAuthentication = isDeviceSupported;
       });
+    } catch (error) {
+      debugPrint('Device authentication check failed: $error');
+      if (mounted) {
+        setState(() {
+          _hasDeviceAuthentication = false;
+        });
+      }
     }
   }
 
@@ -93,19 +101,14 @@ class _SettingsPageState extends State<SettingsPage> {
     bool authenticated = false;
     try {
       authenticated = await _localAuth.authenticate(
-        localizedReason: 'Authenticate using your device lock to continue',
-        options: const AuthenticationOptions(biometricOnly: true),
+        localizedReason: 'Authenticate with your device to continue',
+        options: const AuthenticationOptions(biometricOnly: false),
       );
-    } catch (e) {
-      print('Authentication error: $e');
+    } catch (error) {
+      debugPrint('Authentication error: $error');
     }
 
-    if (!mounted) {
-      setState(() {
-        _isAuthenticating = false;
-      });
-      return;
-    }
+    if (!mounted) return;
 
     if (authenticated) {
       if (value) {
@@ -300,44 +303,27 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _exportLogs() async {
-    bool hasUserAborted = true;
-    String? pickedSaveFilePath;
-
     try {
-      // Prepare logs into bytes
-      final logsJson = jsonEncode(
-        _logs.map(
-          (key, value) => MapEntry(key.toIso8601String(), value.toMap()),
-        ),
+      final logsBytes = Uint8List.fromList(
+        utf8.encode(_storageService.exportLogsJson(_logs)),
       );
-      final Uint8List logsBytes = Uint8List.fromList(utf8.encode(logsJson));
-
-      // Show "Save As" dialog
-      pickedSaveFilePath = await FilePicker.platform.saveFile(
+      final path = await FilePicker.platform.saveFile(
         allowedExtensions: ['json'],
         type: FileType.custom,
-        dialogTitle: 'Export your logs',
+        dialogTitle: 'Export your data',
         fileName: 'sunrise_signal_data_export.json',
         bytes: logsBytes,
       );
-
-      hasUserAborted = pickedSaveFilePath == null;
-    } on PlatformException catch (e) {
-      _logException('Unsupported operation: $e');
+      if (!mounted || (path == null && !kIsWeb)) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Data exported successfully.')),
+      );
+    } on PlatformException catch (error) {
+      _logException('Unsupported operation: $error');
+      _showDataError('Could not export data on this device.');
     } catch (e) {
       _logException('Error: $e');
-    }
-
-    if (!mounted) return;
-
-    if (hasUserAborted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Export cancelled.')),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Logs exported successfully!')),
-      );
+      _showDataError('Could not export data.');
     }
   }
 
@@ -346,40 +332,65 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _importLogs() async {
-    final result = await FilePicker.platform.pickFiles();
-    if (result != null && result.files.single.path != null) {
-      final file = File(result.files.single.path!);
-      final content = await file.readAsString();
-      final Map<String, dynamic> decodedLogs = jsonDecode(content);
-      final importedLogs = decodedLogs.map((key, value) => MapEntry(
-            DateTime.parse(key),
-            LogModel.fromMap(value),
-          ));
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        withData: true,
+      );
+      if (result == null) return;
+
+      final bytes = result.files.single.bytes;
+      if (bytes == null) {
+        throw const FormatException('The selected file could not be read.');
+      }
+      final importedLogs = _storageService.parseLogsJson(utf8.decode(bytes));
+      if (!mounted) return;
+
+      final shouldReplace = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Replace current data?'),
+          content: Text(
+            'Import ${importedLogs.length} log entries and replace your current logs? Passcode and biometric settings are not included.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Import'),
+            ),
+          ],
+        ),
+      );
+      if (shouldReplace != true || !mounted) return;
+
+      await _storageService.saveLogs(importedLogs);
+      if (!mounted) return;
       setState(() {
         _logs = importedLogs;
       });
-      await _storageService.saveLogs(_logs);
-
-      showImportSuccessDialog(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Data imported successfully.')),
+      );
+    } on FormatException {
+      _showDataError('This file is not a valid Sunrise Signal data export.');
+    } on PlatformException catch (error) {
+      _logException('Unsupported operation: $error');
+      _showDataError('Could not import data on this device.');
+    } catch (error) {
+      _logException('Error: $error');
+      _showDataError('Could not import data.');
     }
   }
 
-  void showImportSuccessDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          content: const Text('Your data has been imported successfully!'),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () {
-                SystemNavigator.pop();
-              },
-              child: const Text('Restart App'),
-            ),
-          ],
-        );
-      },
+  void _showDataError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
     );
   }
 
@@ -426,12 +437,21 @@ class _SettingsPageState extends State<SettingsPage> {
               onChanged: _togglePasscode,
             ),
           ),
-          if (_hasBiometrics)
+          if (_hasDeviceAuthentication)
             ListTile(
               title: const Text('Enable Biometric/Device Lock'),
               trailing: Switch(
                 value: _isBiometricEnabled,
                 onChanged: _toggleBiometric,
+              ),
+            ),
+          if (!_hasDeviceAuthentication)
+            ListTile(
+              title: const Text('Biometric/Device Lock Unavailable'),
+              subtitle: Text(
+                kIsWeb || defaultTargetPlatform == TargetPlatform.linux
+                    ? 'System authentication is not supported on Web or Linux. Use the passcode lock instead.'
+                    : 'This device does not provide system authentication. Use the passcode lock instead.',
               ),
             ),
           const Divider(),
@@ -448,24 +468,20 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const Divider(),
           ListTile(
-            title: GestureDetector(
-              onTap: _exportLogs,
-              child: const Text('Export Data', style: TextStyle(fontSize: 16)),
-            ),
+            title: const Text('Export Data'),
             trailing: IconButton(
               icon: const Icon(Icons.download),
               onPressed: _exportLogs,
             ),
+            onTap: _exportLogs,
           ),
           ListTile(
-            title: GestureDetector(
-              onTap: _importLogs,
-              child: const Text('Import Data', style: TextStyle(fontSize: 16)),
-            ),
+            title: const Text('Import Data'),
             trailing: IconButton(
               icon: const Icon(Icons.upload),
               onPressed: _importLogs,
             ),
+            onTap: _importLogs,
           ),
           const SizedBox(height: 20),
           GestureDetector(

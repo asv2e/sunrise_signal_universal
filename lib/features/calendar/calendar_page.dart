@@ -31,6 +31,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
   Future<void> _loadLogs() async {
     final logs = await _storageService.loadLogs();
+    if (!mounted) return;
     setState(() {
       _logs = logs;
     });
@@ -402,11 +403,12 @@ class _CalendarPageState extends State<CalendarPage> {
           ),
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () {
-              Navigator.push(
+            onPressed: () async {
+              await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => const SettingsPage()),
               );
+              await _loadLogs();
             },
           ),
         ],
