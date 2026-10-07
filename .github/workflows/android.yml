@@ -46,20 +46,10 @@ jobs:
           mkdir -p output
           mv build/app/outputs/flutter-apk/*.apk output/
 
-      - name: Sign APKs
-        uses: ilharp/sign-android-release@v2
-        id: sign_app
-        with:
-          releaseDir: output
-          signingKey: ${{ secrets.KEYSTORE_BASE64 }}
-          keyAlias: ${{ secrets.KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-
-      - name: Rename signed APKs
+      - name: Rename APKs
         id: rename_apk
         run: |
-          for f in output/*-signed.apk; do
+          for f in output/app-*-release.apk; do
             abi=$(basename $f | sed 's/.*-\(arm64-v8a\|armeabi-v7a\|x86_64\).*/\1/')
             apkName="Sunrise_Signal_${abi}.apk"
             mv $f output/$apkName
