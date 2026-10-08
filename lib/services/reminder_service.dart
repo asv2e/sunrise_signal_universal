@@ -165,11 +165,11 @@ class ReminderService {
     final now = tz.TZDateTime.now(tz.local);
     final scheduledDate = _nextOccurrence(now, hour, minute);
     await _flutterLocalNotificationsPlugin.zonedSchedule(
-      0,
-      'Did you wake up with morning wood?',
-      null,
-      scheduledDate,
-      notificationDetails(),
+      id: 0,
+      title: 'Did you wake up with morning wood?',
+      body: null,
+      scheduledDate: scheduledDate,
+      notificationDetails: notificationDetails(),
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.time,
     );
@@ -194,11 +194,11 @@ class ReminderService {
         minute,
       );
       await _flutterLocalNotificationsPlugin.zonedSchedule(
-        day,
-        'Did you wake up with morning wood?',
-        null,
-        scheduledDate,
-        notificationDetails(),
+        id: day,
+        title: 'Did you wake up with morning wood?',
+        body: null,
+        scheduledDate: scheduledDate,
+        notificationDetails: notificationDetails(),
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       );
       if (day % 25 == 24) {
@@ -235,10 +235,10 @@ class ReminderService {
       _scheduleNextLinuxReminder(hour: hour, minute: minute);
       unawaited(
         _flutterLocalNotificationsPlugin.show(
-          0,
-          'Did you wake up with morning wood?',
-          null,
-          const NotificationDetails(
+          id: 0,
+          title: 'Did you wake up with morning wood?',
+          body: null,
+          notificationDetails: const NotificationDetails(
             linux: LinuxNotificationDetails(),
           ),
         ),
