@@ -73,7 +73,7 @@ jobs:
 
       - run: flutter pub get
       - run: flutter build ipa --release --no-codesign
-      - run: flutter build macos --release
+      - run: flutter build macos --release --no-codesign
 
       - name: Package unsigned iOS IPA
         shell: bash
