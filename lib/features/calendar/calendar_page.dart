@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:sunrise_signal/features/analytics/analytics_page.dart';
@@ -142,8 +143,7 @@ class _CalendarPageState extends State<CalendarPage> {
                       ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
-                        // ignore: deprecated_member_use
-                        value: stressLevel,
+                        initialValue: stressLevel,
                         decoration:
                             const InputDecoration(labelText: 'Stress Level'),
                         items: ['Low', 'Medium', 'High']
@@ -374,7 +374,7 @@ class _CalendarPageState extends State<CalendarPage> {
         title: const Text('Sunrise Signal'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.analytics),
+            icon: const Icon(CupertinoIcons.chart_bar),
             onPressed: () {
               Navigator.push(
                 context,
@@ -383,7 +383,7 @@ class _CalendarPageState extends State<CalendarPage> {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.settings),
+            icon: const Icon(CupertinoIcons.settings),
             onPressed: () async {
               await Navigator.push(
                 context,

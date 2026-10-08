@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -104,7 +105,7 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       authenticated = await _localAuth.authenticate(
         localizedReason: 'Authenticate with your device to continue',
-        options: const AuthenticationOptions(biometricOnly: false),
+        biometricOnly: false,
       );
     } catch (error) {
       debugPrint('Authentication error: $error');
@@ -332,14 +333,14 @@ class _SettingsPageState extends State<SettingsPage> {
       final logsBytes = Uint8List.fromList(
         utf8.encode(_storageService.exportLogsJson(_logs)),
       );
-      final path = await FilePicker.platform.saveFile(
+      final savedFile = await FilePicker.saveFile(
         allowedExtensions: ['json'],
         type: FileType.custom,
         dialogTitle: 'Export your data',
         fileName: 'sunrise_signal_data_export.json',
         bytes: logsBytes,
       );
-      if (!mounted || (path == null && !kIsWeb)) return;
+      if (!mounted || savedFile == null) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Data exported successfully.')),
       );
@@ -358,17 +359,13 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _importLogs() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['json'],
-        withData: true,
       );
-      if (result == null) return;
+      if (result.isEmpty) return;
 
-      final bytes = result.files.single.bytes;
-      if (bytes == null) {
-        throw const FormatException('The selected file could not be read.');
-      }
+      final bytes = await result.single.readAsBytes();
       final importedLogs = _storageService.parseLogsJson(utf8.decode(bytes));
       if (!mounted) return;
 
@@ -495,7 +492,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ListTile(
             title: const Text('Export Data'),
             trailing: IconButton(
-              icon: const Icon(Icons.download),
+              icon: const Icon(CupertinoIcons.arrow_down_circle),
               onPressed: _exportLogs,
             ),
             onTap: _exportLogs,
@@ -503,7 +500,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ListTile(
             title: const Text('Import Data'),
             trailing: IconButton(
-              icon: const Icon(Icons.upload),
+              icon: const Icon(CupertinoIcons.arrow_up_circle),
               onPressed: _importLogs,
             ),
             onTap: _importLogs,

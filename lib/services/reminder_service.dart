@@ -34,8 +34,8 @@ class ReminderService {
     if (!supportsDailyReminders) return;
 
     tz.initializeTimeZones();
-    final String currentTimeZone = await FlutterTimezone.getLocalTimezone();
-    tz.setLocalLocation(tz.getLocation(currentTimeZone));
+    final timezoneInfo = await FlutterTimezone.getLocalTimezone();
+    tz.setLocalLocation(tz.getLocation(timezoneInfo.identifier));
 
     const androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -66,7 +66,9 @@ class ReminderService {
           : null,
     );
 
-    await _flutterLocalNotificationsPlugin.initialize(initializationSettings);
+    await _flutterLocalNotificationsPlugin.initialize(
+      settings: initializationSettings,
+    );
     unawaited(
       _restoreReminder().catchError((Object error, StackTrace stackTrace) {
         FlutterError.reportError(

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
-import 'package:flutter/services.dart';
 import 'package:sunrise_signal/features/calendar/calendar_page.dart';
 
 import '../../services/auth_service.dart';
@@ -102,7 +101,7 @@ class LockScreenPageState extends State<LockScreenPage> {
     try {
       bool isAuthenticated = await _localAuth.authenticate(
         localizedReason: "Authenticate with your device to unlock",
-        options: const AuthenticationOptions(stickyAuth: true),
+        persistAcrossBackgrounding: true,
       );
 
       if (!mounted) return;
@@ -119,7 +118,7 @@ class LockScreenPageState extends State<LockScreenPage> {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Biometric authentication failed')));
       }
-    } on PlatformException catch (e) {
+    } on LocalAuthException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Error: $e')));
