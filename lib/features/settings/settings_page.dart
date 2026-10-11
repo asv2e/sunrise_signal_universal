@@ -10,6 +10,7 @@ import 'package:sunrise_signal/services/theme_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/reminder_service.dart';
 import '../../services/secure_storage_service.dart';
+import '../../services/web_download.dart';
 import '../../models/log_model.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -329,10 +330,27 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _exportLogs() async {
+    String? json;
     try {
-      final logsBytes = Uint8List.fromList(
-        utf8.encode(_storageService.exportLogsJson(_logs)),
-      );
+      json = _storageService.exportLogsJson(_logs);
+      final logsBytes = Uint8List.fromList(utf8.encode(json));
+      if (kIsWeb) {
+        final result = await downloadBytes(
+          logsBytes,
+          'sunrise_signal_data_export.json',
+        );
+        if (!mounted || result == WebDownloadResult.cancelled) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result == WebDownloadResult.openedInBrowser
+                  ? 'Export opened in a new tab. Use Share to save it to Files.'
+                  : 'Data exported successfully.',
+            ),
+          ),
+        );
+        return;
+      }
       final savedFile = await FilePicker.saveFile(
         allowedExtensions: ['json'],
         type: FileType.custom,
@@ -346,10 +364,24 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     } on PlatformException catch (error) {
       _logException('Unsupported operation: $error');
-      _showDataError('Could not export data on this device.');
+      await _copyExportFallback(json, 'Could not export data on this device.');
     } catch (e) {
       _logException('Error: $e');
-      _showDataError('Could not export data.');
+      await _copyExportFallback(json, 'Could not export data.');
+    }
+  }
+
+  Future<void> _copyExportFallback(String? json, String message) async {
+    if (json == null) {
+      _showDataError(message);
+      return;
+    }
+    try {
+      await Clipboard.setData(ClipboardData(text: json));
+      _showDataError('$message Your data was copied to the clipboard instead.');
+    } catch (e) {
+      _logException('Clipboard fallback failed: $e');
+      _showDataError(message);
     }
   }
 
