@@ -626,9 +626,6 @@ class _CalendarPageState extends State<CalendarPage> {
         final monthNo = monthLogs.where((l) => l.emoji == '😔').length;
         final monthTotal = monthYes + monthNo;
         final monthRate = monthTotal == 0 ? 0.0 : (monthYes / monthTotal);
-        final monthAvgSleep = monthLogs.isEmpty
-            ? 0.0
-            : (monthLogs.fold<double>(0, (sum, l) => sum + l.sleepHours) / monthLogs.length);
 
         final selectedLog = _selectedDay != null ? logProvider.getLogForDate(_selectedDay!) : null;
 

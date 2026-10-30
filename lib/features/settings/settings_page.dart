@@ -684,7 +684,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
     await showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Set Passcode'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -705,7 +705,10 @@ class _SettingsPageState extends State<SettingsPage> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () async {
               if (codeCtrl.text.isEmpty || codeCtrl.text != confirmCtrl.text) {
@@ -713,8 +716,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 return;
               }
               await _authService.setPasscode(codeCtrl.text);
+              if (!mounted || !dialogContext.mounted) return;
               setState(() => _isPasscodeSet = true);
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               _showToast('Passcode enabled');
             },
             child: const Text('Save'),
