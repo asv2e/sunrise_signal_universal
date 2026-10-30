@@ -1,17 +1,23 @@
 import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:local_auth/local_auth.dart';
-import 'package:file_picker/file_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
-import 'package:sunrise_signal/services/theme_service.dart';
+import 'package:sunrise_signal/providers/providers/settings_provider.dart';
+
+import '../../models/log_model.dart';
+import '../../providers/log_provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/reminder_service.dart';
 import '../../services/secure_storage_service.dart';
-import '../../services/web_download.dart';
-import '../../models/log_model.dart';
+import '../../services/theme_service.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -31,14 +37,12 @@ class _SettingsPageState extends State<SettingsPage> {
   final AuthService _authService = AuthService();
   final SecureStorageService _storageService = SecureStorageService();
   final LocalAuthentication _localAuth = LocalAuthentication();
-  Map<DateTime, LogModel> _logs = {};
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
-    _checkDeviceAuthentication();
-    _loadLogs();
+    _checkBiometrics();
   }
 
   Future<void> _loadSettings() async {
@@ -46,22 +50,24 @@ class _SettingsPageState extends State<SettingsPage> {
     final biometricEnabled = await _authService.isBiometricEnabled();
     final reminderEnabled = await ReminderService.isReminderEnabled();
     final reminderTime = await ReminderService.getReminderTime();
-    setState(() {
-      _isPasscodeSet = passcodeSet;
-      _isBiometricEnabled = biometricEnabled;
-      _isReminderEnabled =
-          ReminderService.supportsDailyReminders && reminderEnabled;
-      _reminderTime =
-          ReminderService.supportsDailyReminders ? reminderTime : null;
-    });
+
+    if (mounted) {
+      setState(() {
+        _isPasscodeSet = passcodeSet;
+        _isBiometricEnabled = passcodeSet && biometricEnabled;
+        _isReminderEnabled = reminderEnabled;
+        _reminderTime = reminderTime;
+      });
+    }
   }
 
-  Future<void> _checkDeviceAuthentication() async {
+  Future<void> _checkBiometrics() async {
     try {
-      final isDeviceSupported = await _localAuth.isDeviceSupported();
+      final canCheck = await _localAuth.canCheckBiometrics;
+      final isSupported = await _localAuth.isDeviceSupported();
       if (!mounted) return;
       setState(() {
-        _hasDeviceAuthentication = isDeviceSupported;
+        _hasDeviceAuthentication = canCheck && isSupported;
       });
     } catch (error) {
       debugPrint('Device authentication check failed: $error');
@@ -73,100 +79,80 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _loadLogs() async {
-    final logs = await _storageService.loadLogs();
-    setState(() {
-      _logs = logs;
-    });
+  // --- BIOMETRIC TOGGLE (Guards BOTH ON and OFF) ---
+  Future<void> _toggleBiometric(bool value) async {
+    if (!_isPasscodeSet) {
+      _showToast('Please set a passcode first');
+      return;
+    }
+
+    if (_isAuthenticating) return;
+    setState(() => _isAuthenticating = true);
+
+    bool authenticated = false;
+    try {
+      authenticated = await _localAuth.authenticate(
+        localizedReason: value
+            ? 'Authenticate to enable biometric protection'
+            : 'Authenticate to disable biometric protection',
+      );
+    } catch (e) {
+      debugPrint('Biometric Error: $e');
+    }
+
+    if (!mounted) return;
+
+    if (authenticated) {
+      HapticFeedback.lightImpact();
+      if (value) {
+        await _authService.enableBiometricLock();
+        setState(() => _isBiometricEnabled = true);
+        _showToast('Biometric lock enabled');
+      } else {
+        await _authService.disableBiometricLock();
+        setState(() => _isBiometricEnabled = false);
+        _showToast('Biometric lock removed');
+      }
+    } else {
+      HapticFeedback.mediumImpact();
+      _showToast('Authentication cancelled');
+    }
+
+    setState(() => _isAuthenticating = false);
   }
 
+  // --- PASSCODE ---
   Future<void> _togglePasscode(bool value) async {
     if (value) {
       await showSetPasscodeDialog(context);
       if (!mounted) return;
     } else {
       await _authService.removePasscode();
-      if (!mounted) return;
+      // If passcode is removed, also turn off biometric protection
+      if (_isBiometricEnabled) {
+        await _authService.disableBiometricLock();
+      }
       setState(() {
         _isPasscodeSet = false;
+        _isBiometricEnabled = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Passcode removed successfully!')),
-      );
+      _showToast('Passcode removed');
     }
   }
 
-  Future<void> _toggleBiometric(bool value) async {
-    if (_isAuthenticating) return;
-    setState(() {
-      _isAuthenticating = true;
-    });
-
-    bool authenticated = false;
-    try {
-      authenticated = await _localAuth.authenticate(
-        localizedReason: 'Authenticate with your device to continue',
-        biometricOnly: false,
-      );
-    } catch (error) {
-      debugPrint('Authentication error: $error');
-    }
-
-    if (!mounted) return;
-
-    if (authenticated) {
-      if (value) {
-        await _enableBiometricLock();
-        if (!mounted) return;
-        setState(() {
-          _isAuthenticating = false;
-        });
-      } else {
-        await _authService.disableBiometricLock();
-        if (!mounted) return;
-        setState(() {
-          _isBiometricEnabled = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Disabled Biometric/Device Lock!')),
-        );
-        setState(() {
-          _isAuthenticating = false;
-        });
-      }
-    } else {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Authentication failed')),
-      );
-      setState(() {
-        _isAuthenticating = false;
-      });
-    }
-  }
-
-  Future<bool> _requestNotificationPermission() async {
-    final notificationPermission =
-        await ReminderService().requestNotificationPermission();
-    if (!notificationPermission) {
-      if (!mounted) return false;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content:
-              Text('Notification permission is required to enable reminders.'),
-        ),
-      );
-      return false;
-    }
-    return true;
-  }
-
+  // --- REMINDERS ---
   Future<void> _toggleReminder(bool value) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
 
     if (value) {
       await _pickTimeAndSetReminder();
-      return;
+    } else {
+      await ReminderService.cancelReminders();
+      setState(() {
+        _isReminderEnabled = false;
+        _reminderTime = null;
+      });
+      _showToast('Daily reminders turned off');
     }
 
     await ReminderService.cancelReminders();
@@ -181,431 +167,560 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _pickTimeAndSetReminder() async {
-    final currentContext = context;
-    final messenger = ScaffoldMessenger.maybeOf(currentContext);
-    if (!ReminderService.supportsDailyReminders) {
-      messenger?.showSnackBar(
-        const SnackBar(
-          content: Text('Daily reminders are not supported on this platform.'),
-        ),
-      );
+    // 1. Check and request Exact Alarm permission for Android 13+
+    if (Theme.of(context).platform == TargetPlatform.android) {
+      final status = await Permission.scheduleExactAlarm.status;
+      if (!status.isGranted) {
+        final result = await Permission.scheduleExactAlarm.request();
+        if (!result.isGranted) {
+          if (!mounted) return;
+          _showExactAlarmPermissionDialog();
+          return;
+        }
+      }
+    }
+
+    final plugin = FlutterLocalNotificationsPlugin();
+
+    // 2. Resolve platform-specific implementation to check / request regular notifications
+    final androidImpl =
+        plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    final iosImpl =
+        plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
+
+    // 3. Check current notification permission status
+    bool? isGranted = await androidImpl?.areNotificationsEnabled() ?? false;
+
+    if (isGranted != true) {
+      if (androidImpl != null) {
+        isGranted = await androidImpl.requestNotificationsPermission();
+      } else if (iosImpl != null) {
+        isGranted = await iosImpl.requestPermissions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+      }
+    }
+
+    if (isGranted != true) {
+      if (!mounted) return;
+      _showPermissionDeniedDialog();
       return;
     }
 
-    bool permissionGranted = await _requestNotificationPermission();
-    if (!permissionGranted) return; // Stop if no permission
-
-    final TimeOfDay? pickedTime = await showTimePicker(
-      // ignore: use_build_context_synchronously
-      context: currentContext,
-      initialTime: _reminderTime ?? TimeOfDay.now(),
+    // 4. Open TimePicker and schedule reminder if permissions are granted
+    if (!mounted) return;
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: _reminderTime ?? const TimeOfDay(hour: 7, minute: 0),
     );
 
     if (pickedTime != null) {
       if (!mounted) return;
       setState(() {
         _reminderTime = pickedTime;
+        _isReminderEnabled = true;
       });
+
       await ReminderService().scheduleDailyReminder(
         hour: pickedTime.hour,
         minute: pickedTime.minute,
       );
+
       if (!mounted) return;
-      setState(() {
-        _isReminderEnabled = true;
-      });
-      messenger?.showSnackBar(
-        const SnackBar(content: Text('Daily reminder set!')),
-      );
+      _showToast('Reminder set for ${pickedTime.format(context)}');
     }
   }
 
-  Future<void> showSetPasscodeDialog(BuildContext context) async {
-    final TextEditingController passcodeController = TextEditingController();
-    final TextEditingController confirmPasscodeController =
-        TextEditingController();
-
-    await showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Set Passcode'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: passcodeController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Enter Passcode',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: confirmPasscodeController,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Confirm Passcode',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () async {
-                final String passcode = passcodeController.text.trim();
-                final String confirmPasscode =
-                    confirmPasscodeController.text.trim();
-                final dialogContext = context;
-                final navigator = Navigator.of(dialogContext);
-                final messenger = ScaffoldMessenger.maybeOf(dialogContext);
-
-                if (passcode.isEmpty || confirmPasscode.isEmpty) {
-                  _showErrorDialog(dialogContext, 'Passcode cannot be blank.');
-                  return;
-                }
-
-                if (passcode != confirmPasscode) {
-                  _showErrorDialog(dialogContext, 'Passcodes do not match.');
-                  return;
-                }
-
-                await _authService.setPasscode(passcode);
-                if (!mounted) return;
-                setState(() {
-                  _isPasscodeSet = true;
-                });
-
-                if (navigator.canPop()) {
-                  navigator.pop();
-                }
-
-                messenger?.showSnackBar(
-                  const SnackBar(content: Text('Passcode set successfully!')),
-                );
-              },
-              child: const Text('Set Passcode'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _showErrorDialog(BuildContext context, String message) {
+  /// Dialog prompting the user to enable exact alarms in system settings if denied
+  void _showExactAlarmPermissionDialog() {
     showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Error'),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _enableBiometricLock() async {
-    await _authService.enableBiometricLock();
-    if (!mounted) return;
-    setState(() {
-      _isBiometricEnabled = true;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Enabled Biometric/Device Lock!')),
-    );
-  }
-
-  Future<void> _exportLogs() async {
-    String? json;
-    try {
-      json = _storageService.exportLogsJson(_logs);
-      final logsBytes = Uint8List.fromList(utf8.encode(json));
-      if (kIsWeb) {
-        final result = await downloadBytes(
-          logsBytes,
-          'sunrise_signal_data_export.json',
-        );
-        if (!mounted || result == WebDownloadResult.cancelled) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              result == WebDownloadResult.openedInBrowser
-                  ? 'Export opened in a new tab. Use Share to save it to Files.'
-                  : 'Data exported successfully.',
-            ),
+      builder: (context) => AlertDialog(
+        title: const Text('Exact Alarm Permission Required'),
+        content: const Text(
+          'To send notifications at the exact scheduled time, please allow exact alarms in system settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
           ),
-        );
-        return;
-      }
-      final savedFile = await FilePicker.saveFile(
-        allowedExtensions: ['json'],
-        type: FileType.custom,
-        dialogTitle: 'Export your data',
-        fileName: 'sunrise_signal_data_export.json',
-        bytes: logsBytes,
-      );
-      if (!mounted || savedFile == null) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Data exported successfully.')),
-      );
-    } on PlatformException catch (error) {
-      _logException('Unsupported operation: $error');
-      await _copyExportFallback(json, 'Could not export data on this device.');
-    } catch (e) {
-      _logException('Error: $e');
-      await _copyExportFallback(json, 'Could not export data.');
-    }
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              openAppSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
   }
 
-  Future<void> _copyExportFallback(String? json, String message) async {
-    if (json == null) {
-      _showDataError(message);
+  void _showPermissionDeniedDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Notification Permission Required'),
+        content: const Text(
+          'Notifications are disabled. Please turn on notifications in app settings to receive daily reminders.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              openAppSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- BACKUP & RESTORE ---
+  Future<void> _exportLogs() async {
+    final logProvider = Provider.of<LogProvider>(context, listen: false);
+    final logs = logProvider.logs;
+
+    if (logs.isEmpty) {
+      _showToast('No logs available to export');
       return;
     }
-    try {
-      await Clipboard.setData(ClipboardData(text: json));
-      _showDataError('$message Your data was copied to the clipboard instead.');
-    } catch (e) {
-      _logException('Clipboard fallback failed: $e');
-      _showDataError(message);
-    }
-  }
 
-  void _logException(String message) {
-    debugPrint('Exception: $message');
+    try {
+      final logsJson = jsonEncode(
+        logs.map((k, v) => MapEntry(k.toIso8601String(), v.toMap())),
+      );
+      final bytes = Uint8List.fromList(utf8.encode(logsJson));
+
+      await FilePicker.saveFile(
+        allowedExtensions: ['json'],
+        type: FileType.custom,
+        fileName: 'sunrise_signal_backup.json',
+        bytes: bytes,
+      );
+      _showToast('Data exported successfully');
+    } catch (e) {
+      _showToast('Export cancelled');
+    }
   }
 
   Future<void> _importLogs() async {
-    try {
-      final result = await FilePicker.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['json'],
-      );
-      if (result.isEmpty) return;
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['json'],
+    );
 
-      final bytes = await result.single.readAsBytes();
-      final importedLogs = _storageService.parseLogsJson(utf8.decode(bytes));
-      if (!mounted) return;
+    if (result.single.path != null) {
+      try {
+        final file = File(result.single.path!);
+        final content = await file.readAsString();
+        final Map<String, dynamic> decoded = jsonDecode(content);
 
-      final shouldReplace = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Replace current data?'),
-          content: Text(
-            'Import ${importedLogs.length} log entries and replace your current logs? Passcode and biometric settings are not included.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Import'),
-            ),
-          ],
-        ),
-      );
-      if (shouldReplace != true || !mounted) return;
+        final imported = decoded.map((k, v) => MapEntry(
+              DateTime.parse(k),
+              LogModel.fromMap(v),
+            ));
 
-      await _storageService.saveLogs(importedLogs);
-      if (!mounted) return;
-      setState(() {
-        _logs = importedLogs;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Data imported successfully.')),
-      );
-    } on FormatException {
-      _showDataError('This file is not a valid Sunrise Signal data export.');
-    } on PlatformException catch (error) {
-      _logException('Unsupported operation: $error');
-      _showDataError('Could not import data on this device.');
-    } catch (error) {
-      _logException('Error: $error');
-      _showDataError('Could not import data.');
+        await _storageService.saveLogs(imported);
+
+        if (!mounted) return;
+        await Provider.of<LogProvider>(context, listen: false).loadLogs();
+        _showToast('All logs restored successfully!');
+      } catch (e) {
+        _showToast('Invalid backup file');
+      }
     }
   }
 
-  void _showDataError(String message) {
-    if (!mounted) return;
+  void _showToast(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    int flag = 0;
-    bool locked = true;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings'),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [
-          ListTile(
-            title: const Text('Daily Reminder'),
-            subtitle: Text(_reminderSubtitle(context)),
-            trailing: Switch(
-              value: _isReminderEnabled,
-              onChanged: ReminderService.supportsDailyReminders
-                  ? (value) async {
-                      if (value) {
-                        await _pickTimeAndSetReminder();
-                      } else {
-                        await _toggleReminder(false);
-                      }
-                    }
-                  : null,
-            ),
-            onTap: ReminderService.supportsDailyReminders
-                ? () async {
-                    if (!_isReminderEnabled) {
-                      await _pickTimeAndSetReminder();
-                    }
-                  }
-                : null,
-          ),
-          const Divider(),
-          ListTile(
-            title: const Text('Enable Passcode Lock'),
-            trailing: Switch(
-              value: _isPasscodeSet,
-              onChanged: _togglePasscode,
-            ),
-          ),
-          if (_hasDeviceAuthentication)
-            ListTile(
-              title: const Text('Enable Biometric/Device Lock'),
-              trailing: Switch(
-                value: _isBiometricEnabled,
-                onChanged: _toggleBiometric,
+          // 1. ROUTINE & TIMING
+          _buildSectionHeader('ROUTINE & TIMING'),
+          _buildGroupContainer(
+            isDark: isDark,
+            children: [
+              _buildSettingTile(
+                icon: CupertinoIcons.bell_fill,
+                iconColor: const Color(0xFFF59E0B),
+                title: 'Daily Check-in Reminder',
+                subtitle: _isReminderEnabled && _reminderTime != null
+                    ? _reminderTime!.format(context)
+                    : 'Off',
+                trailing: CupertinoSwitch(
+                  value: _isReminderEnabled,
+                  activeTrackColor: theme.colorScheme.primary,
+                  onChanged: _toggleReminder,
+                ),
+                onTap: () => _pickTimeAndSetReminder(),
               ),
-            ),
-          if (!_hasDeviceAuthentication)
-            ListTile(
-              title: const Text('Biometric/Device Lock Unavailable'),
-              subtitle: Text(
-                kIsWeb || defaultTargetPlatform == TargetPlatform.linux
-                    ? 'System authentication is not supported on Web or Linux. Use the passcode lock instead.'
-                    : 'This device does not provide system authentication. Use the passcode lock instead.',
+              _buildDivider(isDark),
+              _buildSettingTile(
+                icon: CupertinoIcons.calendar,
+                iconColor: const Color(0xFF38BDF8),
+                title: 'First Day of Week',
+                subtitle: Provider.of<SettingsProvider>(context).firstDayOfWeek,
+                trailing: const Icon(CupertinoIcons.chevron_forward, size: 16),
+                onTap: () => _showFirstDayPicker(context),
               ),
-            ),
-          const Divider(),
-          ListTile(
-            title: const Text('Dark Theme'),
-            trailing: Consumer<ThemeService>(
-              builder: (context, themeService, _) => Switch(
-                value: themeService.isDarkMode,
-                onChanged: (value) {
-                  themeService.toggleDarkMode(value);
-                },
-              ),
-            ),
-          ),
-          const Divider(),
-          ListTile(
-            title: const Text('Export Data'),
-            trailing: IconButton(
-              icon: const Icon(CupertinoIcons.arrow_down_circle),
-              onPressed: _exportLogs,
-            ),
-            onTap: _exportLogs,
-          ),
-          ListTile(
-            title: const Text('Import Data'),
-            trailing: IconButton(
-              icon: const Icon(CupertinoIcons.arrow_up_circle),
-              onPressed: _importLogs,
-            ),
-            onTap: _importLogs,
+            ],
           ),
           const SizedBox(height: 20),
-          GestureDetector(
-            onTap: () {
-              if (flag > 8) {
-                locked = false;
-              }
-              flag++;
-            },
-            onLongPress: () {
-              if (!locked) {
-                showDialog<String>(
+
+          // 2. PRIVACY & SECURITY
+          _buildSectionHeader('PRIVACY & SECURITY'),
+          _buildGroupContainer(
+            isDark: isDark,
+            children: [
+              _buildSettingTile(
+                icon: CupertinoIcons.lock_shield_fill,
+                iconColor: theme.colorScheme.primary,
+                title: 'Passcode Lock',
+                subtitle: _isPasscodeSet ? 'Enabled' : 'Disabled',
+                trailing: CupertinoSwitch(
+                  value: _isPasscodeSet,
+                  activeTrackColor: theme.colorScheme.primary,
+                  onChanged: _togglePasscode,
+                ),
+              ),
+              // Biometrics is only available when device supports it AND a passcode is set
+              if (_hasDeviceAuthentication && _isPasscodeSet) ...[
+                _buildDivider(isDark),
+                _buildSettingTile(
+                  icon: CupertinoIcons.viewfinder,
+                  iconColor: const Color(0xFF10B981),
+                  title: 'Biometric / Face ID',
+                  subtitle: _isBiometricEnabled ? 'Required to unlock' : 'Disabled',
+                  trailing: CupertinoSwitch(
+                    value: _isBiometricEnabled,
+                    activeTrackColor: theme.colorScheme.primary,
+                    onChanged: _toggleBiometric,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 20),
+
+          // 3. APPEARANCE
+          _buildSectionHeader('APPEARANCE'),
+          _buildGroupContainer(
+            isDark: isDark,
+            children: [
+              Consumer<ThemeService>(
+                builder: (context, themeService, _) => _buildSettingTile(
+                  icon: isDark ? CupertinoIcons.moon_fill : CupertinoIcons.sun_max_fill,
+                  iconColor: const Color(0xFFA855F7),
+                  title: 'Dark Theme',
+                  subtitle: themeService.isDarkMode ? 'Midnight Slate' : 'Morning Light',
+                  trailing: CupertinoSwitch(
+                    value: themeService.isDarkMode,
+                    activeTrackColor: theme.colorScheme.primary,
+                    onChanged: (val) => themeService.toggleDarkMode(val),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+
+          // 4. DATA MANAGEMENT
+          _buildSectionHeader('DATA MANAGEMENT'),
+          _buildGroupContainer(
+            isDark: isDark,
+            children: [
+              _buildSettingTile(
+                icon: CupertinoIcons.arrow_down_doc_fill,
+                iconColor: const Color(0xFF0EA5E9),
+                title: 'Export Backup',
+                subtitle: 'Save records as a JSON file',
+                trailing: const Icon(CupertinoIcons.chevron_forward, size: 16),
+                onTap: _exportLogs,
+              ),
+              _buildDivider(isDark),
+              _buildSettingTile(
+                icon: CupertinoIcons.arrow_up_doc_fill,
+                iconColor: const Color(0xFF10B981),
+                title: 'Restore Data',
+                subtitle: 'Import previous JSON logs',
+                trailing: const Icon(CupertinoIcons.chevron_forward, size: 16),
+                onTap: _importLogs,
+              ),
+            ],
+          ),
+          const SizedBox(height: 32),
+
+          Center(
+            child: GestureDetector(
+              onLongPress: () {
+                HapticFeedback.heavyImpact();
+                showDialog(
                   context: context,
-                  builder: (BuildContext context) => AlertDialog(
-                    content: Padding(
-                      padding: const EdgeInsets.all(15.0),
-                      child: Column(
+                  builder: (dialogContext) {
+                    final theme = Theme.of(dialogContext);
+
+                    return AlertDialog(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      content: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          const Text('🌅', style: TextStyle(fontSize: 48)),
+                          const SizedBox(height: 12),
                           Text(
-                            'Developed by Avizit Roy\nWebsite: avizitRX.com',
+                            'Built with ♥️ using Flutter',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
                             textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.bodyLarge,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Free and open source',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Special thanks to everyone who reported issues and shared ideas on GitHub!',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.textTheme.bodySmall?.color?.withValues(alpha: 0.6),
+                            ),
+                            textAlign: TextAlign.center,
                           ),
                         ],
                       ),
-                    ),
-                    actions: <Widget>[
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, 'Close'),
-                        child: const Text('Close'),
-                      ),
-                    ],
-                  ),
+                    );
+                  },
                 );
-              }
-            },
-            child: const Center(
-              child: Text('Sunrise Signal v2.0.0'),
+              },
+              child: Text(
+                'Sunrise Signal v3.0.1',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).hintColor,
+                    ),
+              ),
             ),
           ),
+
           const SizedBox(height: 20),
         ],
       ),
     );
   }
 
-  String _reminderSubtitle(BuildContext context) {
-    if (!ReminderService.supportsDailyReminders) {
-      return 'Not available on this platform';
-    }
+  // --- WEEKEND SCHEDULE DIALOG ---
+  void _showFirstDayPicker(BuildContext context) {
+    final settingsProvider = Provider.of<SettingsProvider>(context, listen: false);
+    final options = ['Monday', 'Sunday', 'Saturday'];
 
-    final time = _isReminderEnabled && _reminderTime != null
-        ? _reminderTime!.format(context)
-        : null;
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'First Day of Week',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Choose which day your calendar columns begin with.',
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+                const SizedBox(height: 16),
+                ...options.map((opt) {
+                  final isSelected = opt == settingsProvider.firstDayOfWeek;
+                  return ListTile(
+                    title: Text(opt, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    trailing: isSelected
+                        ? Icon(CupertinoIcons.checkmark_alt,
+                            color: Theme.of(context).colorScheme.primary)
+                        : null,
+                    onTap: () async {
+                      await settingsProvider.setFirstDayOfWeek(opt);
+                      HapticFeedback.selectionClick();
+                      if (context.mounted) Navigator.pop(context);
+                    },
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.linux:
-        return time == null
-            ? 'Only while the app is open'
-            : '$time · App must stay open';
-      case TargetPlatform.windows:
-        return time == null
-            ? 'Windows queues one year; reopen the app to renew'
-            : '$time · Queued for one year';
-      case TargetPlatform.android:
-      case TargetPlatform.iOS:
-      case TargetPlatform.macOS:
-      case TargetPlatform.fuchsia:
-        return time ?? 'Off';
-    }
+  // --- UI BUILDER HELPERS ---
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 8, bottom: 8),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 11,
+          letterSpacing: 1.0,
+          fontWeight: FontWeight.w700,
+          color: Colors.grey,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroupContainer({
+    required bool isDark,
+    required List<Widget> children,
+  }) {
+    final cardColor = isDark ? const Color(0xFF161F2E) : Colors.white;
+    final borderColor = isDark ? const Color(0xFF263346) : const Color(0xFFE2E8F0);
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: borderColor),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(17),
+        child: Material(
+          color: cardColor,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: children,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSettingTile({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required Widget trailing,
+    VoidCallback? onTap,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return ListTile(
+      onTap: onTap,
+      splashColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+      hoverColor:
+          isDark ? Colors.white.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.03),
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: iconColor.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, color: iconColor, size: 18),
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: TextStyle(
+          fontSize: 12,
+          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+        ),
+      ),
+      trailing: trailing,
+    );
+  }
+
+  Widget _buildDivider(bool isDark) {
+    return Divider(
+      height: 1,
+      thickness: 1,
+      indent: 52,
+      color: isDark ? const Color(0xFF263346) : const Color(0xFFF1F5F9),
+    );
+  }
+
+  Future<void> showSetPasscodeDialog(BuildContext context) async {
+    final codeCtrl = TextEditingController();
+    final confirmCtrl = TextEditingController();
+
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Set Passcode'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: codeCtrl,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Enter Passcode'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: confirmCtrl,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Confirm Passcode'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () async {
+              if (codeCtrl.text.isEmpty || codeCtrl.text != confirmCtrl.text) {
+                _showToast('Passcodes do not match');
+                return;
+              }
+              await _authService.setPasscode(codeCtrl.text);
+              setState(() => _isPasscodeSet = true);
+              Navigator.pop(context);
+              _showToast('Passcode enabled');
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
   }
 }
